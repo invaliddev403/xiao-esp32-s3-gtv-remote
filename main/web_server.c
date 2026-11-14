@@ -6,7 +6,9 @@
 #include "cJSON.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "remote.h"
 
 extern const uint8_t index_html_start[] asm("_binary_index_html_start");
@@ -59,6 +61,9 @@ static esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddStringToObject(body, "peer_name", remote_peer_name());
     cJSON_AddNumberToObject(body, "rssi", remote_peer_rssi());
     cJSON_AddNumberToObject(body, "bonded_devices", remote_saved_device_count());
+    cJSON_AddNumberToObject(body, "uptime_seconds", esp_timer_get_time() / 1000000);
+    cJSON_AddNumberToObject(body, "free_heap_bytes", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(body, "minimum_free_heap_bytes", esp_get_minimum_free_heap_size());
 
     char address[18] = "Unavailable";
     uint8_t bytes[6];

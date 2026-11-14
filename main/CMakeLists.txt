@@ -6,5 +6,5 @@ idf_component_register(
         "web_server.c"
     INCLUDE_DIRS "."
     EMBED_FILES "web/index.html"
-    REQUIRES esp_hid nvs_flash esp_tinyusb esp_netif esp_http_server cjson lwip
+    REQUIRES driver esp_hid nvs_flash esp_tinyusb esp_netif esp_http_server esp_timer heap cjson lwip
 )

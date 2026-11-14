@@ -88,7 +88,7 @@ esp_err_t usb_network_init(void)
     netif_mac[5] ^= 0x01;
     ESP_RETURN_ON_ERROR(esp_netif_set_mac(usb_netif, netif_mac), tag, "USB MAC configuration failed");
 
-    uint32_t lease_minutes = 60;
+    uint32_t lease_minutes = 1440;
     ESP_RETURN_ON_ERROR(esp_netif_dhcps_option(usb_netif, ESP_NETIF_OP_SET,
                                                IP_ADDRESS_LEASE_TIME, &lease_minutes,
                                                sizeof(lease_minutes)), tag,

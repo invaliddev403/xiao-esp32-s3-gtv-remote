@@ -107,6 +107,8 @@
         <div class="detail"><dt>Address</dt><dd id="peer-address">—</dd></div>
         <div class="detail"><dt>Signal</dt><dd id="rssi">—</dd></div>
         <div class="detail"><dt>Saved bonds</dt><dd id="bonds">—</dd></div>
+        <div class="detail"><dt>Uptime</dt><dd id="uptime">—</dd></div>
+        <div class="detail"><dt>Free heap</dt><dd id="heap">—</dd></div>
       </dl>
       <h2>Saved devices</h2>
       <div class="device-list" id="device-list"><p class="empty-devices">Loading…</p></div>
@@ -130,6 +132,7 @@
     let switchingAddress = null;
     let previousBondCount = null;
     let nameNewDeviceOnConnect = false;
+    let statusRequestInFlight = false;
 
     function notify(message) {
       toast.textContent = message;
@@ -138,11 +141,17 @@
       toastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
     }
 
-    async function request(url, options) {
-      const response = await fetch(url, options);
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'Request failed');
-      return body;
+    async function request(url, options = {}) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
+      try {
+        const response = await fetch(url, {...options, signal:controller.signal});
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || 'Request failed');
+        return body;
+      } finally {
+        clearTimeout(timeout);
+      }
     }
 
     async function sendKey(key, button) {
@@ -250,15 +259,19 @@
     }
 
     async function updateStatus() {
+      if (statusRequestInFlight) return;
+      statusRequestInFlight = true;
       let state;
       try {
         state = await request('/api/status');
       } catch (error) {
+        statusRequestInFlight = false;
         connected = false;
         statusElement.classList.remove('connected');
         statusText.textContent = 'Board unreachable';
         return;
       }
+      statusRequestInFlight = false;
       if (previousBondCount !== null && state.bonded_devices > previousBondCount) {
         nameNewDeviceOnConnect = true;
       }
@@ -273,6 +286,11 @@
       document.getElementById('peer-address').textContent = connected ? state.peer_address : '—';
       document.getElementById('rssi').textContent = connected && state.rssi !== 127 ? `${state.rssi} dBm` : '—';
       document.getElementById('bonds').textContent = state.bonded_devices;
+      const uptimeSeconds = Number(state.uptime_seconds) || 0;
+      const uptimeHours = Math.floor(uptimeSeconds / 3600);
+      const uptimeMinutes = Math.floor((uptimeSeconds % 3600) / 60);
+      document.getElementById('uptime').textContent = `${uptimeHours}h ${uptimeMinutes}m`;
+      document.getElementById('heap').textContent = `${Math.round((state.free_heap_bytes || 0) / 1024)} KB free · ${Math.round((state.minimum_free_heap_bytes || 0) / 1024)} KB minimum`;
       document.getElementById('disconnect').disabled = !connected;
       try {
         renderDevices(savedDevices);

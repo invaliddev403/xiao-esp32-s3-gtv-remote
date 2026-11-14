@@ -23,6 +23,8 @@ Replace `COMx` with the board's flashing port. If automatic reset does not enter
 
 The HTTP interface is exposed only on the USB NCM interface. USB serial/JTAG logging is not available while TinyUSB is using the native USB peripheral; use the UART pins if firmware logs are needed.
 
+The onboard user LED is solid while connected to a Google TV and blinks while disconnected. A frozen LED alongside an unresponsive webapp can help identify a firmware stall.
+
 ## Controls
 
 Navigation/OK, Back, Home, Power, Volume Up/Down, Mute, Play/Pause, Rewind, Fast Forward, Previous, Next, and Stop use the same BLE HID report map as the touchscreen remote. Pair the new board separately because it has a different Bluetooth address.
