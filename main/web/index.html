@@ -38,6 +38,9 @@
     .media-grid .play-pause{background:var(--accent);color:#08162b;border-color:#a6c8ff}
     .media-grid .play-pause:hover{background:#91bcff}
     .media-grid .secondary-media{color:var(--muted);background:#151f32}
+    .text-entry{display:grid;grid-template-columns:1fr auto;gap:10px}
+    .text-input{min-width:0;border:1px solid var(--border);border-radius:15px;background:#0d1524;color:var(--text);font:inherit;padding:12px 15px}
+    .text-input:focus{outline:3px solid var(--accent);outline-offset:2px}
     .details{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
     .detail{min-width:0}.detail dt{font-size:12px;color:var(--muted);margin-bottom:2px}.detail dd{margin:0;overflow-wrap:anywhere}
     .device-list{display:grid;gap:10px;margin:0 0 18px}
@@ -53,6 +56,7 @@
     .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);max-width:min(90vw,500px);padding:12px 18px;border-radius:12px;background:#3b1f2a;border:1px solid #844454;opacity:0;pointer-events:none;transition:.2s;z-index:2}
     .toast.show{opacity:1;transform:translate(-50%,0)}
     @media(max-width:720px){.grid{grid-template-columns:1fr}.shell{padding-top:16px}.card{padding:16px}.dpad{max-width:280px}.media-grid{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:480px){.text-entry{grid-template-columns:1fr}}
     @media(max-width:390px){header{align-items:flex-start;flex-direction:column}.status{align-self:stretch;justify-content:center}.details{grid-template-columns:1fr}}
   </style>
 </head>
@@ -101,6 +105,14 @@
       </div>
     </div>
     <section class="card" style="margin-top:18px">
+      <h2>Keyboard</h2>
+      <form class="text-entry" id="text-form">
+        <input class="text-input" id="text-input" type="text" maxlength="96" placeholder="Text to type on Google TV" aria-label="Text to type on Google TV" autocomplete="off" spellcheck="false">
+        <button class="key" id="type-text" type="submit">Type on TV</button>
+      </form>
+      <p class="hint">Focus a text field on the TV first. Standard letters, numbers, and symbols are supported; use OK to submit.</p>
+    </section>
+    <section class="card" style="margin-top:18px">
       <h2>Connection</h2>
       <dl class="details">
         <div class="detail"><dt>Paired device</dt><dd id="peer-name">—</dd></div>
@@ -109,6 +121,7 @@
         <div class="detail"><dt>Saved bonds</dt><dd id="bonds">—</dd></div>
         <div class="detail"><dt>Uptime</dt><dd id="uptime">—</dd></div>
         <div class="detail"><dt>Free heap</dt><dd id="heap">—</dd></div>
+        <div class="detail"><dt>Firmware</dt><dd id="firmware-version">—</dd></div>
       </dl>
       <h2>Saved devices</h2>
       <div class="device-list" id="device-list"><p class="empty-devices">Loading…</p></div>
@@ -170,6 +183,24 @@
 
     document.querySelectorAll('[data-key]').forEach(button => {
       button.addEventListener('click', () => sendKey(button.dataset.key, button));
+    });
+
+    document.getElementById('text-form').addEventListener('submit', async event => {
+      event.preventDefault();
+      const input = document.getElementById('text-input');
+      const button = document.getElementById('type-text');
+      if (!connected) { notify('Google TV is not connected'); return; }
+      if (!input.value.length) { notify('Enter text to type'); input.focus(); return; }
+      button.disabled = true;
+      try {
+        await request('/api/text', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:input.value})});
+        notify(`Typing on ${activeDeviceName}…`);
+        input.select();
+      } catch (error) {
+        notify(error.message);
+      } finally {
+        button.disabled = false;
+      }
     });
 
     async function connectDevice(device) {
@@ -286,6 +317,7 @@
       document.getElementById('peer-address').textContent = connected ? state.peer_address : '—';
       document.getElementById('rssi').textContent = connected && state.rssi !== 127 ? `${state.rssi} dBm` : '—';
       document.getElementById('bonds').textContent = state.bonded_devices;
+      document.getElementById('firmware-version').textContent = `v${state.firmware_version}`;
       const uptimeSeconds = Number(state.uptime_seconds) || 0;
       const uptimeHours = Math.floor(uptimeSeconds / 3600);
       const uptimeMinutes = Math.floor((uptimeSeconds % 3600) / 60);

@@ -14,6 +14,8 @@ idf.py -p COMx flash
 
 Replace `COMx` with the board's flashing port. If automatic reset does not enter the bootloader, hold the XIAO **BOOT** button while tapping **RESET**, then release **BOOT** and flash again.
 
+For each firmware release, increment `project(... VERSION ...)` in the top-level `CMakeLists.txt`. The version is embedded in the application, returned by `/api/status`, and displayed in the webapp's Connection section.
+
 ## Use
 
 1. Connect the XIAO to the computer by USB and wait a few seconds for the USB network adapter to obtain an address.
@@ -27,4 +29,4 @@ The onboard user LED is solid while connected to a Google TV and blinks while di
 
 ## Controls
 
-Navigation/OK, Back, Home, Power, Volume Up/Down, Mute, Play/Pause, Rewind, Fast Forward, Previous, Next, and Stop use the same BLE HID report map as the touchscreen remote. Pair the new board separately because it has a different Bluetooth address.
+Navigation/OK, Back, Home, Power, Volume Up/Down, Mute, Play/Pause, Rewind, Fast Forward, Previous, Next, and Stop use the same BLE HID report map as the touchscreen remote. The Keyboard panel types up to 96 printable ASCII characters into the currently focused TV text field. Pair the new board separately because it has a different Bluetooth address.

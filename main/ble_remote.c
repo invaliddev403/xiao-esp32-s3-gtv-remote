@@ -24,7 +24,21 @@
 
 static const char *tag = "ble_remote";
 static esp_hidd_dev_t *hid_device;
-static QueueHandle_t key_queue;
+static QueueHandle_t command_queue;
+
+typedef enum {
+    REMOTE_EVENT_KEY,
+    REMOTE_EVENT_TEXT,
+} remote_event_type_t;
+
+typedef struct {
+    remote_event_type_t type;
+    union {
+        remote_key_t key;
+        char text[REMOTE_MAX_TEXT_LENGTH + 1];
+    } data;
+} remote_event_t;
+
 static volatile bool connected;
 static volatile bool pairing_failed;
 static esp_bd_addr_t peer_address;
@@ -420,16 +434,16 @@ static void hid_event_handler(void *handler_args, esp_event_base_t base, int32_t
             break;
         }
         pairing_only = false;
-        if (key_queue) {
-            xQueueReset(key_queue);
+        if (command_queue) {
+            xQueueReset(command_queue);
         }
         connected = true;
         ESP_LOGI(tag, "Connected to Google TV");
         break;
     case ESP_HIDD_DISCONNECT_EVENT:
         connected = false;
-        if (key_queue) {
-            xQueueReset(key_queue);
+        if (command_queue) {
+            xQueueReset(command_queue);
         }
         ESP_LOGI(tag, "Disconnected%s", manual_disconnect ? "; waiting for device selection" : "; advertising");
         start_advertising();
@@ -532,17 +546,105 @@ static void send_key(remote_key_t key)
     release_reports();
 }
 
+static bool text_key(char value, uint8_t *modifier, uint8_t *code)
+{
+    *modifier = 0;
+    if (value >= 'a' && value <= 'z') {
+        *code = 0x04 + value - 'a';
+        return true;
+    }
+    if (value >= 'A' && value <= 'Z') {
+        *modifier = 0x02;
+        *code = 0x04 + value - 'A';
+        return true;
+    }
+    if (value >= '1' && value <= '9') {
+        *code = 0x1E + value - '1';
+        return true;
+    }
+
+    switch (value) {
+    case '0': *code = 0x27; return true;
+    case ' ': *code = 0x2C; return true;
+    case '\n': *code = 0x28; return true;
+    case '`': *code = 0x35; return true;
+    case '~': *modifier = 0x02; *code = 0x35; return true;
+    case '-': *code = 0x2D; return true;
+    case '_': *modifier = 0x02; *code = 0x2D; return true;
+    case '=': *code = 0x2E; return true;
+    case '+': *modifier = 0x02; *code = 0x2E; return true;
+    case '[': *code = 0x2F; return true;
+    case '{': *modifier = 0x02; *code = 0x2F; return true;
+    case ']': *code = 0x30; return true;
+    case '}': *modifier = 0x02; *code = 0x30; return true;
+    case '\\': *code = 0x31; return true;
+    case '|': *modifier = 0x02; *code = 0x31; return true;
+    case ';': *code = 0x33; return true;
+    case ':': *modifier = 0x02; *code = 0x33; return true;
+    case '\'': *code = 0x34; return true;
+    case '"': *modifier = 0x02; *code = 0x34; return true;
+    case ',': *code = 0x36; return true;
+    case '<': *modifier = 0x02; *code = 0x36; return true;
+    case '.': *code = 0x37; return true;
+    case '>': *modifier = 0x02; *code = 0x37; return true;
+    case '/': *code = 0x38; return true;
+    case '?': *modifier = 0x02; *code = 0x38; return true;
+    case '!': *modifier = 0x02; *code = 0x1E; return true;
+    case '@': *modifier = 0x02; *code = 0x1F; return true;
+    case '#': *modifier = 0x02; *code = 0x20; return true;
+    case '$': *modifier = 0x02; *code = 0x21; return true;
+    case '%': *modifier = 0x02; *code = 0x22; return true;
+    case '^': *modifier = 0x02; *code = 0x23; return true;
+    case '&': *modifier = 0x02; *code = 0x24; return true;
+    case '*': *modifier = 0x02; *code = 0x25; return true;
+    case '(': *modifier = 0x02; *code = 0x26; return true;
+    case ')': *modifier = 0x02; *code = 0x27; return true;
+    default: return false;
+    }
+}
+
+static void send_text(const char *text)
+{
+    ESP_LOGI(tag, "Typing %u characters", (unsigned)strlen(text));
+    for (size_t i = 0; text[i]; i++) {
+        if (!connected || !esp_hidd_dev_connected(hid_device)) {
+            return;
+        }
+        uint8_t modifier;
+        uint8_t code;
+        if (!text_key(text[i], &modifier, &code)) {
+            continue;
+        }
+        uint8_t report[8] = {0};
+        report[0] = modifier;
+        report[2] = code;
+        esp_err_t result = esp_hidd_dev_input_set(hid_device, 0, HID_REPORT_ID_KEYBOARD,
+                                                   report, sizeof(report));
+        vTaskDelay(pdMS_TO_TICKS(30));
+        release_reports();
+        if (result != ESP_OK) {
+            ESP_LOGW(tag, "Keyboard input failed: %s", esp_err_to_name(result));
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
 static void remote_task(void *argument)
 {
-    remote_key_t key;
+    remote_event_t event;
     while (true) {
-        if (xQueueReceive(key_queue, &key, portMAX_DELAY) != pdTRUE) {
+        if (xQueueReceive(command_queue, &event, portMAX_DELAY) != pdTRUE) {
             continue;
         }
         if (!connected || !hid_device || !esp_hidd_dev_connected(hid_device)) {
             continue;
         }
-        send_key(key);
+        if (event.type == REMOTE_EVENT_KEY) {
+            send_key(event.data.key);
+        } else if (event.type == REMOTE_EVENT_TEXT) {
+            send_text(event.data.text);
+        }
     }
 }
 
@@ -616,8 +718,8 @@ esp_err_t remote_init(void)
     ESP_RETURN_ON_ERROR(esp_hidd_dev_init(&hid_config, ESP_HID_TRANSPORT_BLE, hid_event_handler, &hid_device), tag, "HID initialization failed");
     ESP_RETURN_ON_ERROR(esp_hidd_dev_battery_set(hid_device, 100), tag, "Battery report configuration failed");
 
-    key_queue = xQueueCreate(16, sizeof(remote_key_t));
-    ESP_RETURN_ON_FALSE(key_queue != NULL, ESP_ERR_NO_MEM, tag, "Key queue creation failed");
+    command_queue = xQueueCreate(8, sizeof(remote_event_t));
+    ESP_RETURN_ON_FALSE(command_queue != NULL, ESP_ERR_NO_MEM, tag, "Command queue creation failed");
     ESP_RETURN_ON_FALSE(xTaskCreate(remote_task, "remote_task", 4096, NULL, 5, NULL) == pdPASS,
                         ESP_ERR_NO_MEM, tag, "Remote task creation failed");
     return ESP_OK;
@@ -921,8 +1023,36 @@ esp_err_t remote_clear_pairing(void)
 
 esp_err_t remote_send_key(remote_key_t key)
 {
-    if (!key_queue) {
+    if (!command_queue) {
         return ESP_ERR_INVALID_STATE;
     }
-    return xQueueSend(key_queue, &key, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+    remote_event_t event = {
+        .type = REMOTE_EVENT_KEY,
+        .data.key = key,
+    };
+    return xQueueSend(command_queue, &event, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
+}
+
+esp_err_t remote_send_text(const char *text)
+{
+    if (!command_queue) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!text) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    size_t length = strnlen(text, REMOTE_MAX_TEXT_LENGTH + 1);
+    if (length == 0 || length > REMOTE_MAX_TEXT_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    remote_event_t event = {.type = REMOTE_EVENT_TEXT};
+    for (size_t i = 0; i < length; i++) {
+        if (text[i] < 32 || text[i] > 126) {
+            return ESP_ERR_INVALID_ARG;
+        }
+        event.data.text[i] = text[i];
+    }
+    event.data.text[length] = '\0';
+    return xQueueSend(command_queue, &event, 0) == pdTRUE ? ESP_OK : ESP_ERR_TIMEOUT;
 }

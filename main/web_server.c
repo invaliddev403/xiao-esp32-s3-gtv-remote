@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "cJSON.h"
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_http_server.h"
 #include "esp_heap_caps.h"
@@ -61,6 +62,7 @@ static esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddStringToObject(body, "peer_name", remote_peer_name());
     cJSON_AddNumberToObject(body, "rssi", remote_peer_rssi());
     cJSON_AddNumberToObject(body, "bonded_devices", remote_saved_device_count());
+    cJSON_AddStringToObject(body, "firmware_version", esp_app_get_description()->version);
     cJSON_AddNumberToObject(body, "uptime_seconds", esp_timer_get_time() / 1000000);
     cJSON_AddNumberToObject(body, "free_heap_bytes", esp_get_free_heap_size());
     cJSON_AddNumberToObject(body, "minimum_free_heap_bytes", esp_get_minimum_free_heap_size());
@@ -168,6 +170,41 @@ static esp_err_t key_handler(httpd_req_t *request)
         return send_error(request, "503 Service Unavailable", "Could not queue key");
     }
     return send_ok(request);
+}
+
+static esp_err_t text_handler(httpd_req_t *request)
+{
+    if (request->content_len == 0 || request->content_len > 256) {
+        return send_error(request, "400 Bad Request", "Invalid request size");
+    }
+    char body[257];
+    size_t received = 0;
+    while (received < request->content_len) {
+        int result = httpd_req_recv(request, body + received, request->content_len - received);
+        if (result <= 0) {
+            return send_error(request, "400 Bad Request", "Could not read request");
+        }
+        received += result;
+    }
+    body[received] = '\0';
+
+    cJSON *json = cJSON_Parse(body);
+    const cJSON *text = json ? cJSON_GetObjectItemCaseSensitive(json, "text") : NULL;
+    if (!cJSON_IsString(text)) {
+        cJSON_Delete(json);
+        return send_error(request, "400 Bad Request", "Text is required");
+    }
+    if (!remote_is_connected()) {
+        cJSON_Delete(json);
+        return send_error(request, "409 Conflict", "Google TV is not connected");
+    }
+    esp_err_t result = remote_send_text(text->valuestring);
+    cJSON_Delete(json);
+    if (result == ESP_ERR_INVALID_ARG) {
+        return send_error(request, "400 Bad Request", "Use 1-96 printable ASCII characters");
+    }
+    return result == ESP_OK ? send_ok(request)
+                            : send_error(request, "503 Service Unavailable", "Could not queue text");
 }
 
 static bool parse_address(const char *text, uint8_t *address)
@@ -318,6 +355,7 @@ esp_err_t web_server_start(void)
         {.uri = "/", .method = HTTP_GET, .handler = index_handler},
         {.uri = "/api/status", .method = HTTP_GET, .handler = status_handler},
         {.uri = "/api/key", .method = HTTP_POST, .handler = key_handler},
+        {.uri = "/api/text", .method = HTTP_POST, .handler = text_handler},
         {.uri = "/api/connect", .method = HTTP_POST, .handler = connect_handler},
         {.uri = "/api/disconnect", .method = HTTP_POST, .handler = disconnect_handler},
         {.uri = "/api/rename", .method = HTTP_POST, .handler = rename_handler},
